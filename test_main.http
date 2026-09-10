@@ -1,0 +1,26 @@
+# Root
+
+GET http://127.0.0.1:8000/
+Accept: application/json
+
+### Process liveness
+GET http://127.0.0.1:8000/api/v1/health
+Accept: application/json
+
+### RAG query (503 until providers are configured)
+POST http://127.0.0.1:8000/api/v1/rag/query
+Content-Type: application/json
+
+{
+  "question": "RAG 시스템의 구조를 설명해줘",
+  "top_k": 5
+}
+
+### Validation error (422)
+POST http://127.0.0.1:8000/api/v1/rag/query
+Content-Type: application/json
+
+{
+  "question": "   ",
+  "top_k": 0
+}
