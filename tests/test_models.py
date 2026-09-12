@@ -104,6 +104,23 @@ class ModelTests(unittest.TestCase):
             self.assertIsNone(connection.execute('SELECT encrypted_api_key FROM model_configs').fetchone()[0])
         self.assertEqual(self.client.post(self.url, json=payload).status_code, 201)
 
+    def test_quantized_ollama_selection_is_used_for_upload(self):
+        model_id = 'embeddinggemma:300m-qat-q8_0'
+        saved = self.client.post(self.url, json={'name': 'Local Q8', 'provider': 'ollama', 'model': model_id})
+        self.assertEqual(saved.status_code, 201, saved.text)
+        self.assertEqual(self.client.get(self.url).json()[0]['model'], model_id)
+        with patch('app.services.documents.httpx.Client') as provider:
+            post = provider.return_value.__enter__.return_value.post
+            post.return_value.json.return_value = {'embeddings': [[0.1, 0.2]]}
+            response = self.client.post('/api/v1/documents',
+                                        data={'project_id': self.project, 'model_config_id': saved.json()['id']},
+                                        files={'file': ('korean.txt', '한국어 문서 검색 테스트'.encode())})
+            self.assertEqual(response.status_code, 201, response.text)
+            self.assertEqual(post.call_args.args[0], self.settings.embedding_base_url + '/api/embed')
+            self.assertEqual(post.call_args.kwargs['json']['model'], model_id)
+        self.assertEqual(response.json()['embedding_provider'], 'ollama')
+        self.assertEqual(response.json()['embedding_model'], model_id)
+
     def test_conflicting_upload_selection(self):
         model = self.create()
         response = self.client.post('/api/v1/documents', data={'project_id': self.project, 'model_config_id': model['id'], 'embedding_provider': 'ollama'}, files={'file': ('x.txt', b'hello')})
