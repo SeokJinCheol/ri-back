@@ -5,3 +5,4 @@ uvicorn>=0.52.4,<1.0
 python-multipart>=0.0.20,<1.0
 httpx>=0.28,<1.0
 pypdf>=6.0,<7.0
+cryptography>=43,<47

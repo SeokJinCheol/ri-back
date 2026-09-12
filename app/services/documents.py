@@ -10,7 +10,7 @@ import httpx
 from pypdf import PdfReader
 
 from app.core.config import Settings
-from app.schemas.documents import DocumentResponse
+from app.schemas.documents import DocumentResponse, DocumentUpdate, ChunkPage, ChunkResponse
 
 
 class DocumentError(Exception):
@@ -75,6 +75,17 @@ class DocumentService:
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         connection.executescript("""
+            CREATE TABLE IF NOT EXISTS service_settings (
+                id TEXT NOT NULL, project_id TEXT NOT NULL, name TEXT NOT NULL,
+                description TEXT NOT NULL, members TEXT NOT NULL, index_limit INTEGER NOT NULL DEFAULT 5,
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(project_id, id)
+            );
+            CREATE TABLE IF NOT EXISTS indices (
+                id TEXT PRIMARY KEY, project_id TEXT NOT NULL, name TEXT NOT NULL,
+                description TEXT NOT NULL, service_id TEXT NOT NULL,
+                service_name TEXT NOT NULL, created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS indices_project ON indices(project_id);
             CREATE TABLE IF NOT EXISTS documents (
                 id TEXT PRIMARY KEY, project_id TEXT NOT NULL, filename TEXT NOT NULL,
                 size_bytes INTEGER NOT NULL, chunk_count INTEGER NOT NULL,
@@ -94,14 +105,34 @@ class DocumentService:
             columns = {row[1] for row in connection.execute("PRAGMA table_info(documents)")}
             if "embedding_provider" not in columns:
                 connection.execute("ALTER TABLE documents ADD COLUMN embedding_provider TEXT NOT NULL DEFAULT 'ollama'")
+            if "index_id" not in columns:
+                connection.execute("ALTER TABLE documents ADD COLUMN index_id TEXT REFERENCES indices(id) ON DELETE SET NULL")
+            connection.execute("CREATE INDEX IF NOT EXISTS documents_index ON documents(index_id)")
+            if "updated_at" not in columns:
+                connection.execute("ALTER TABLE documents ADD COLUMN updated_at TEXT")
+                connection.execute("UPDATE documents SET updated_at = created_at")
+            if "embedding_size_bytes" not in columns:
+                connection.execute("ALTER TABLE documents ADD COLUMN embedding_size_bytes INTEGER NOT NULL DEFAULT 0")
+                connection.execute("UPDATE documents SET embedding_size_bytes = COALESCE((SELECT SUM(length(CAST(embedding AS BLOB))) FROM chunks WHERE document_id = documents.id), 0)")
+            index_columns = {row[1] for row in connection.execute("PRAGMA table_info(indices)")}
+            if "updated_at" not in index_columns:
+                connection.execute("ALTER TABLE indices ADD COLUMN updated_at TEXT")
+                connection.execute("UPDATE indices SET updated_at = created_at")
         return connection
 
-    def list_documents(self, project_id: str) -> list[DocumentResponse]:
+    @staticmethod
+    def require_index(connection: sqlite3.Connection, project_id: str, index_id: str):
+        if not connection.execute("SELECT id FROM indices WHERE id = ? AND project_id = ?", (index_id, project_id)).fetchone():
+            raise DocumentError(404, "인덱스를 찾을 수 없습니다. 인덱스 목록을 새로고침하세요.")
+
+    def list_documents(self, project_id: str, index_id: str | None = None) -> list[DocumentResponse]:
         connection = self.connect()
         try:
+            if index_id is not None:
+                self.require_index(connection, project_id, index_id)
             rows = connection.execute(
-                "SELECT * FROM documents WHERE project_id = ? ORDER BY created_at DESC",
-                (project_id,),
+                "SELECT * FROM documents WHERE project_id = ?" + (" AND index_id = ?" if index_id is not None else "") + " ORDER BY created_at DESC",
+                (project_id, index_id) if index_id is not None else (project_id,),
             ).fetchall()
             return [DocumentResponse(**dict(row)) for row in rows]
         finally:
@@ -132,6 +163,7 @@ class DocumentService:
 
     def embed(self, chunks: list[str]) -> list[list[float]]:
         vectors = []
+        embedding_bytes = 0
         is_openai = self.settings.embedding_provider == "openai"
         key = self.settings.openai_api_key.get_secret_value().strip()
         if is_openai and not key:
@@ -172,6 +204,9 @@ class DocumentService:
                             raise ValueError("Invalid embedding")
                         if vectors and len(vector) != len(vectors[0]):
                             raise ValueError("Embedding dimension mismatch")
+                        embedding_bytes += len(json.dumps(vector, allow_nan=False).encode('utf-8'))
+                        if embedding_bytes > self.settings.max_embedding_bytes:
+                            raise DocumentError(413, "임베딩 결과가 문서당 최대 100MB를 초과했습니다.")
                         vectors.append(vector)
         except httpx.HTTPStatusError as exc:
             if is_openai:
@@ -201,35 +236,79 @@ class DocumentService:
             raise DocumentError(503, "임베딩에 실패했습니다. Ollama 실행 상태와 임베딩 모델 설정을 확인하세요.") from exc
         return vectors
 
-    def ingest(self, project_id: str, filename: str, data: bytes) -> DocumentResponse:
+    def ingest(self, project_id: str, filename: str, data: bytes, index_id: str | None = None) -> DocumentResponse:
         if Path(filename).suffix.lower() not in {".txt", ".md", ".pdf"}:
             raise DocumentError(415, "TXT, MD, PDF 파일만 업로드할 수 있습니다.")
         if len(data) > self.settings.max_upload_bytes:
             raise DocumentError(413, "파일 업로드 용량 제한을 초과했습니다.")
+        if index_id is not None:
+            connection = self.connect()
+            try:
+                self.require_index(connection, project_id, index_id)
+            finally:
+                connection.close()
         text = extract_text(filename, data, self.settings.max_document_chars)
         chunks = chunk_text(text, self.settings.chunk_size, self.settings.chunk_overlap)
         vectors = self.embed(chunks)
+        serialized_vectors = [json.dumps(vector, allow_nan=False) for vector in vectors]
+        embedding_size = sum(len(vector.encode('utf-8')) for vector in serialized_vectors)
+        if embedding_size > self.settings.max_embedding_bytes:
+            raise DocumentError(413, "임베딩 결과가 문서당 최대 100MB를 초과했습니다.")
+        now = datetime.now(timezone.utc).isoformat()
         document = DocumentResponse(
-            id=str(uuid4()), project_id=project_id, filename=filename,
+            id=str(uuid4()), project_id=project_id, index_id=index_id, filename=filename,
             size_bytes=len(data), chunk_count=len(chunks),
             embedding_provider=self.settings.embedding_provider,
             embedding_model=self.model, embedding_dimensions=len(vectors[0]),
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=now, updated_at=now, embedding_size_bytes=embedding_size,
         )
         connection = self.connect()
         try:
             with connection:
+                connection.execute("BEGIN IMMEDIATE")
+                if index_id is not None:
+                    self.require_index(connection, project_id, index_id)
                 connection.execute(
-                    "INSERT INTO documents (id, project_id, filename, size_bytes, chunk_count, embedding_model, embedding_dimensions, created_at, embedding_provider) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO documents (id, project_id, filename, size_bytes, chunk_count, embedding_model, embedding_dimensions, created_at, embedding_provider, index_id, updated_at, embedding_size_bytes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (document.id, document.project_id, document.filename, document.size_bytes,
                      document.chunk_count, document.embedding_model,
-                     document.embedding_dimensions, document.created_at, document.embedding_provider),
+                     document.embedding_dimensions, document.created_at, document.embedding_provider, document.index_id, document.updated_at, document.embedding_size_bytes),
                 )
                 connection.executemany(
                     "INSERT INTO chunks VALUES (?, ?, ?, ?)",
-                    [(document.id, index, chunk, json.dumps(vector, allow_nan=False))
-                     for index, (chunk, vector) in enumerate(zip(chunks, vectors, strict=True))],
+                    [(document.id, index, chunk, vector)
+                     for index, (chunk, vector) in enumerate(zip(chunks, serialized_vectors, strict=True))],
                 )
         finally:
             connection.close()
         return document
+
+
+    def update_document(self, project_id: str, document_id: str, payload: DocumentUpdate) -> DocumentResponse:
+        connection = self.connect()
+        try:
+            with connection:
+                connection.execute('BEGIN IMMEDIATE')
+                if not connection.execute('SELECT id FROM documents WHERE id = ? AND project_id = ?', (document_id, project_id)).fetchone():
+                    raise DocumentError(404, '문서를 찾을 수 없습니다.')
+                index_id = str(payload.index_id) if payload.index_id else None
+                if index_id:
+                    self.require_index(connection, project_id, index_id)
+                connection.execute('UPDATE documents SET filename = ?, index_id = ?, updated_at = ? WHERE id = ? AND project_id = ?',
+                                   (payload.filename, index_id, datetime.now(timezone.utc).isoformat(), document_id, project_id))
+                row = connection.execute('SELECT * FROM documents WHERE id = ?', (document_id,)).fetchone()
+                return DocumentResponse(**dict(row))
+        finally:
+            connection.close()
+
+    def list_chunks(self, project_id: str, document_id: str, offset: int, limit: int) -> ChunkPage:
+        connection = self.connect()
+        try:
+            row = connection.execute('SELECT * FROM documents WHERE id = ? AND project_id = ?', (document_id, project_id)).fetchone()
+            if row is None:
+                raise DocumentError(404, '문서를 찾을 수 없습니다.')
+            chunks = connection.execute('SELECT chunk_index, content, length(CAST(embedding AS BLOB)) AS embedding_size_bytes FROM chunks WHERE document_id = ? ORDER BY chunk_index LIMIT ? OFFSET ?', (document_id, limit, offset)).fetchall()
+            return ChunkPage(document=DocumentResponse(**dict(row)), total=row['chunk_count'], offset=offset, limit=limit,
+                             items=[ChunkResponse(**dict(chunk), embedding_dimensions=row['embedding_dimensions']) for chunk in chunks])
+        finally:
+            connection.close()
