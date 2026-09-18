@@ -243,8 +243,8 @@ class DocumentTests(unittest.TestCase):
 
     def test_cors(self):
         response = self.client.options("/api/v1/documents", headers={
-            "Origin": "http://localhost:5173", "Access-Control-Request-Method": "POST"})
-        self.assertEqual(response.headers["access-control-allow-origin"], "http://localhost:5173")
+            "Origin": "http://localhost:5174", "Access-Control-Request-Method": "POST"})
+        self.assertEqual(response.headers["access-control-allow-origin"], "http://localhost:5174")
 
 
 if __name__ == "__main__":

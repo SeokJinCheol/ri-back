@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     app_name: str = "Real Iron RAG API"
     environment: Literal["local", "test", "production"] = "local"
     debug: bool = False
-    cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173", "null"]
+    cors_origins: list[str] = ["http://localhost:5174", "http://127.0.0.1:5174", "null"]
     document_db_path: Path = PROJECT_ROOT / "data" / "documents.sqlite3"
     max_embedding_bytes: int = Field(default=100_000_000, gt=0, le=100_000_000)
     max_upload_bytes: int = Field(default=10 * 1024 * 1024, gt=0)
