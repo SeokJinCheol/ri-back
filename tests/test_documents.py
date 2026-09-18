@@ -67,6 +67,38 @@ class DocumentTests(unittest.TestCase):
         self.assertEqual(response.status_code, 201, response.text)
         self.assertEqual(response.json()["status"], "completed")
 
+    def test_delete_cascades_chunks_and_preserves_other_documents(self):
+        with patch.object(self.service, "embed", side_effect=lambda chunks: [[0.1, 0.2] for _ in chunks]):
+            doc = self.service.ingest(self.project, "delete.txt", b"x" * 250)
+            kept = self.service.ingest(self.project, "keep.txt", b"keep")
+        self.assertGreater(doc.chunk_count, 1)
+        url = f"/api/v1/documents/{doc.id}"
+        response = self.client.delete(url, params={"project_id": self.project})
+        self.assertEqual(response.status_code, 204, response.text)
+        self.assertEqual(response.content, b"")
+        self.assertEqual([item.id for item in DocumentService(self.settings).list_documents(self.project)], [kept.id])
+        connection = self.service.connect()
+        try:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM chunks WHERE document_id = ?", (doc.id,)).fetchone()[0], 0)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM chunks WHERE document_id = ?", (kept.id,)).fetchone()[0], kept.chunk_count)
+        finally:
+            connection.close()
+        self.assertEqual(self.client.get(f"{url}/chunks", params={"project_id": self.project}).status_code, 404)
+        self.assertEqual(self.client.delete(url, params={"project_id": self.project}).status_code, 404)
+
+    def test_delete_scopes_project_and_validates_ids(self):
+        with patch.object(self.service, "embed", return_value=[[0.1, 0.2]]):
+            doc = self.service.ingest(self.project, "keep.txt", b"keep")
+        url = f"/api/v1/documents/{doc.id}"
+        self.assertEqual(self.client.delete(url, params={"project_id": str(uuid4())}).status_code, 404)
+        self.assertEqual(self.client.delete(f"/api/v1/documents/{uuid4()}", params={"project_id": self.project}).status_code, 404)
+        self.assertEqual(self.client.delete(url).status_code, 422)
+        self.assertEqual(self.client.delete(url, params={"project_id": "invalid"}).status_code, 422)
+        self.assertEqual(self.client.delete("/api/v1/documents/invalid", params={"project_id": self.project}).status_code, 422)
+        page = self.client.get(f"{url}/chunks", params={"project_id": self.project})
+        self.assertEqual(page.status_code, 200)
+        self.assertEqual(page.json()["total"], 1)
+
     def test_invalid_files(self):
         for name, data, status in [("x.exe", b"x", 415), ("x.txt", b"", 422),
                                    ("x.txt", b"\xff", 422), ("x.pdf", b"invalid", 422),

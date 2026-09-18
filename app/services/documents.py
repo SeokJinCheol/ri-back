@@ -301,6 +301,20 @@ class DocumentService:
         finally:
             connection.close()
 
+    def delete_document(self, project_id: str, document_id: str) -> None:
+        connection = self.connect()
+        try:
+            with connection:
+                # Foreign keys cascade the deletion to all chunks and their embeddings.
+                deleted = connection.execute(
+                    'DELETE FROM documents WHERE id = ? AND project_id = ?',
+                    (document_id, project_id),
+                )
+                if deleted.rowcount == 0:
+                    raise DocumentError(404, '문서를 찾을 수 없습니다.')
+        finally:
+            connection.close()
+
     def list_chunks(self, project_id: str, document_id: str, offset: int, limit: int) -> ChunkPage:
         connection = self.connect()
         try:

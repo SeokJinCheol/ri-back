@@ -1,7 +1,7 @@
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Query, Response
 
 from app.core.config import get_settings
 from app.schemas.documents import DocumentResponse, DocumentUpdate, ChunkPage
@@ -65,5 +65,14 @@ def list_chunks(project_id: UUID, document_id: UUID, service: Annotated[Document
 def update_document(project_id: UUID, document_id: UUID, payload: DocumentUpdate, service: Annotated[DocumentService, Depends(get_document_service)]):
     try:
         return service.update_document(str(project_id), str(document_id), payload)
+    except DocumentError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
+
+
+@router.delete('/{document_id}', status_code=204)
+def delete_document(project_id: UUID, document_id: UUID, service: Annotated[DocumentService, Depends(get_document_service)]):
+    try:
+        service.delete_document(str(project_id), str(document_id))
+        return Response(status_code=204)
     except DocumentError as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc

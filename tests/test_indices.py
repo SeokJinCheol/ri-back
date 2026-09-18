@@ -74,6 +74,16 @@ class IndexTests(unittest.TestCase):
             self.assertEqual(connection.execute('SELECT COUNT(*) FROM chunks').fetchone()[0], 2)
         self.assertEqual(self.client.get(f"{self.url}/{first['id']}").status_code, 404)
 
+    def test_delete_document_updates_count_and_preserves_index(self):
+        index = self.create()
+        doc = self.upload(index['id']).json()
+        response = self.client.delete(f"/api/v1/documents/{doc['id']}", params={'project_id': self.project})
+        self.assertEqual(response.status_code, 204, response.text)
+        detail = self.client.get(f"{self.url}/{index['id']}")
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.json()['document_count'], 0)
+        self.assertEqual(self.documents.list_documents(self.project, index['id']), [])
+
     def test_project_scope_and_invalid_selection(self):
         index = self.create()
         other = str(uuid4())

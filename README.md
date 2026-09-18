@@ -84,6 +84,7 @@ API 키는 `Settings`와 `.env`에 추가합니다. `.env`는 Git에서 제외�
 
 - `POST /api/v1/documents`: multipart 필드 `project_id`(UUID), `file`.
 - `GET /api/v1/documents?project_id=<UUID>`: 프로젝트별 완료 문서 목록.
+- `DELETE /api/v1/documents/{document_id}?project_id=<UUID>`: 문서와 관련 청크·임베딩을 함께 영구 삭제합니다. 성공 시 본문 없이 204, 해당 프로젝트에 문서가 없으면 404를 반환합니다. 인덱스는 유지됩니다. Documents 목록과 문서 상세의 삭제 버튼에서 확인 후 실행할 수 있습니다.
 - 지원: UTF-8 TXT/MD 및 텍스트 PDF, 기본 10MiB. 암호화/스캔 PDF와 DOCX/HWP는 미지원.
 - 기본 800 **문자** 단위, 100자 중복 청킹. 추출 텍스트 최대 100만 자.
 - Ollama `/api/embed` 또는 OpenAI `/v1/embeddings`를 배치 호출하고 전체 성공 후 SQLite 트랜잭션으로 저장합니다.
