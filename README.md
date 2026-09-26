@@ -29,7 +29,44 @@ ri-back/
 
 ## 실행
 
-프로젝트 루트에서 가상환경을 활성화한 후 실행합니다.
+Electron 설치 앱도 이 백엔드에 HTTP API로 연결합니다. 백엔드는 설치 앱에 포함되지 않으므로 별도로 실행해야 합니다.
+설치 파일 빌드와 서버 주소 변경 방법은 [프론트엔드 README](../ri-front/README.md)를 참고하세요.
+Electron의 로컬 파일 화면을 사용하려면 CORS 설정에 `"null"`을 유지하세요(기본값에 포함).
+
+### 현재 macOS 개발 환경
+
+현재 환경에서 정상 실행을 확인한 명령어입니다. 의존성이 설치된 pyenv Python을
+직접 지정하므로 프로젝트 디렉터리의 기본 Python 설정과 관계없이 실행할 수 있습니다.
+아래 경로는 현재 개발 머신 기준입니다.
+
+```bash
+cd /Users/seokjincheol/workspace/ri-project/ri-back
+/Users/seokjincheol/.pyenv/versions/3.13.1/bin/python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+위 명령은 개발용으로 코드 변경 시 자동 재시작합니다. 자동 재시작이 필요 없으면 `--reload`를 제거합니다.
+서버를 종료하려면 실행한 터미널에서 `Ctrl+C`를 누릅니다.
+API 기본 주소는 `http://127.0.0.1:8000/api/v1`, API 문서는 `http://127.0.0.1:8000/docs`입니다.
+서버 실행과 모델 실행은 별개입니다. Ollama 모델을 사용하려면 Ollama도 실행되어 있어야 합니다.
+
+처음 환경을 준비하거나 의존성이 추가된 경우, 위 실행 명령 전에 다음을 실행합니다.
+기존 `.env`는 덮어쓰지 않습니다.
+
+```bash
+cd /Users/seokjincheol/workspace/ri-project/ri-back
+/Users/seokjincheol/.pyenv/versions/3.13.1/bin/python3 -m pip install -r requirements.txt
+if [ ! -f .env ]; then cp .env.example .env; fi
+```
+
+다른 터미널에서 다음 명령으로 정상 응답(`{"status":"ok"}`)을 확인할 수 있습니다.
+
+```bash
+curl --fail --silent --show-error http://127.0.0.1:8000/api/v1/health
+```
+
+### Windows PowerShell
+
+백엔드 프로젝트 루트(`ri-back`)에서 가상환경을 활성화한 후 실행합니다.
 가상환경이 없다면 먼저 `python -m venv .venv`로 생성합니다.
 
 ```powershell
@@ -42,6 +79,9 @@ python -m uvicorn app.main:app --reload
 
 기존 `python -m uvicorn main:app --reload` 실행 방식도 지원합니다.
 Swagger UI: <http://127.0.0.1:8000/docs>
+
+Nginx 경유 Swagger: <http://true-iron.co.kr/ri-rag/api/docs>
+(로컬에서는 <http://localhost/ri-rag/api/docs>). `/api/docs`와 `/api/openapi.json`을 추가로 제공하며 기존 직접 접속 경로는 유지합니다.
 
 ## API
 
@@ -215,3 +255,53 @@ Documents 화면에서는 업로드할 인덱스를 반드시 선택합니다.
 - 기존 임시 로그인에 맞춰 이메일 헤더를 사용합니다. 헤더 자체는 사용자 신원을 인증하지 않으므로 실제 인증·배포용 보안은 별도 서버 로그인 연동이 필요합니다.
 - 기존 프로젝트는 생성자 기록을 알 수 없어 `creator_email = NULL`로 유지합니다. 기존 사용자도 자동 승격하지 않으며 최초 관리자를 별도로 지정하기 전에는 설정을 변경할 수 없습니다.
 - DB에는 프로젝트 생성자·수정일과 사용자 역할을 자동 추가합니다. 기존 생성일과 사용자 데이터는 보존합니다.
+
+## 문서 검색 · Chat · 답변 모델 (2026-09-27)
+
+서비스 범위 문서 검색과 답변 생성, 출처 확인, 대화 저장을 추가했습니다.
+기존 `/api/v1/rag/query`는 미연결 확장용 경로로 유지하며, 실제 Chat은 아래의 서비스 범위 API를 사용합니다.
+
+### 설정 순서
+
+1. **Setting → 모델 등록 → 임베딩**: 문서 업로드와 질문 검색에 사용할 모델을 등록하고 **연결 확인**을 누릅니다.
+2. **Documents**에서 같은 임베딩 모델과 서비스의 인덱스를 선택해 문서를 업로드합니다.
+3. **Setting → 모델 등록 → 답변 생성**: 사용 가능한 생성 모델 ID를 입력합니다. OpenAI는 API 키가 필요하고, Ollama는 백엔드가 연결하는 서버에 모델이 설치돼 있어야 합니다. 등록 자체는 다운로드·학습·외부 호출을 하지 않습니다.
+4. **서비스 → 수정 → 검색 및 답변 모델**에서 임베딩 모델, 답변 모델, 검색 청크 수(1~20), 답변 스타일을 저장합니다.
+5. **Chat**에서 서비스와 검색 인덱스를 선택합니다. **검색만**은 청크 검색 결과만 반환하고, **질문하기**는 답변과 `[1]` 형태의 출처를 반환합니다. 출처를 펼치면 청크 원문과 문서 상세 링크가 표시됩니다.
+
+임베딩 모델은 텍스트를 벡터로 만들고, 답변 모델은 검색된 문서 근거로 문장을 생성합니다. 두 용도는 별도로 등록해야 합니다. 기존 모델은 자동으로 `embedding` 용도로 유지합니다. 답변 모델 ID는 직접 입력하며 실제 사용 가능 여부는 연결 확인으로 검증합니다.
+
+- Ollama: 기존 `RAG_EMBEDDING_BASE_URL`(기본 `http://127.0.0.1:11434`)을 임베딩과 생성 모두에 사용합니다. `ollama list`로 설치 모델을 확인하고, 필요한 모델은 사용자가 `ollama pull <모델 ID>`로 설치합니다.
+- OpenAI: 임베딩은 기존 두 모델, 답변은 Responses API를 지원하고 계정에서 접근 가능한 모델 ID를 사용합니다. 연결 확인도 소량의 유료 API 요청입니다. 질문·검색된 문서 본문·답변 스타일이 선택한 생성 공급자에게 전송되며 후속 질문 재작성 시 최근 질문 최대 3개도 전송됩니다. Responses API 요청에는 `store: false`를 지정합니다.
+- 답변 모델의 원격 호출은 실제 키/설치 모델이 있어야 합니다. 지원 모델 목록을 하드코딩하지 않으며 공급자별 인증·모델 없음·한도 오류를 안내합니다.
+
+### API
+
+| 메서드 | 경로 | 내용 |
+| --- | --- | --- |
+| POST | `/api/v1/projects/{project_id}/models/{model_id}/test` | 용도별 연결 확인, 처리 시간·임베딩 차원 반환 |
+| POST | `/api/v1/projects/{project_id}/services/{service_id}/search` | `question`, `index_ids`, 선택 `top_k`; 검색 출처 반환 |
+| GET/POST | `/api/v1/projects/{project_id}/services/{service_id}/conversations` | 본인 대화 최근 100개 목록 / `index_ids`로 생성 |
+| GET | `/api/v1/conversations/{conversation_id}/messages` | 완료된 질문·답변·현재 열람 가능한 출처 |
+| POST | `/api/v1/conversations/{conversation_id}/messages` | `question`, UUID `client_request_id`로 질문 |
+| DELETE | `/api/v1/conversations/{conversation_id}` | 본인 대화와 메시지 삭제 |
+
+Chat API는 현행 임시 로그인과 동일한 `X-User-Email` 헤더를 요구합니다. 저장된 서비스 멤버 및 대화 소유자를 확인하지만 이 헤더는 실제 인증이 아닙니다. 신규 기능도 **로컬 개발용**이며 실제 로그인·전체 기존 API 권한 통합은 별도 단계입니다.
+
+서비스 저장 API에 `embedding_model_id`, `generation_model_id`, `search_top_k`, `system_prompt`가 추가됩니다. 모델은 같은 프로젝트에서 용도가 일치해야 합니다. 서비스에서 사용하는 모델은 삭제하거나 공급자·용도·ID를 변경할 수 없으며 이름 수정·키 교체는 가능합니다.
+
+### 동작과 제한
+
+- 같은 공급자·모델·차원의 벡터만 비교합니다. 선택 범위에 다른 임베딩 공간이 섞였거나 서비스 검색 모델이 다르면 409를 반환합니다. 기존 혼합 인덱스는 모델별 분리 또는 재업로드가 필요합니다.
+- SQLite에 저장한 벡터를 순회하며 코사인 유사도 상위 청크를 검색합니다. 전용 벡터 인덱스나 재랭커는 아직 없으며 대규모 운영 성능은 별도 측정이 필요합니다.
+- 답변에 사용한 문맥은 최대 16,000자입니다. 모델 문맥 한도에 따른 정밀 토큰 예산은 후속 개선 대상입니다.
+- 모델이 반환한 인용 번호가 실제 전달된 청크에 속하는지 검증합니다. 이는 답변 내용의 사실성 전체를 보증하는 검증은 아닙니다. 근거 부족 응답은 별도 상태로 표시합니다.
+- 후속 질문은 최근 사용자 질문 최대 3개로 독립 질문을 만든 뒤 검색합니다. 이전 AI 답변은 검색 근거에 넣지 않습니다.
+- 대화는 서버 DB에 저장하며 동일 요청 ID의 완료 응답을 재사용합니다. 실패는 동일 ID로 재시도할 수 있습니다. 외부 호출의 정확히 한 번 실행은 보장하지 않습니다.
+- 대화 기록에는 출처 ID를 보관하고 본문을 복제하지 않습니다. 문서가 삭제되거나 다른 서비스로 이동하면 해당 답변과 출처 본문은 열람 불가로 표시합니다. 대화 삭제는 관련 메시지도 삭제합니다.
+- 문서 업로드의 비동기 작업·재임베딩·중복 관리, 실제 사용자 인증, 피드백·운영 지표·외부 API 키는 이번 구현에 포함하지 않습니다. 설계안의 후속 단계입니다.
+
+검증: `python -m unittest discover -s tests -v`; 프론트는 `npm run build`와 `./node_modules/.bin/tsc --noEmit`.
+생성 공급자 호출은 테스트에서 모의 응답으로 검증합니다. 실제 공급자 동작은 등록 모델의 연결 확인으로 확인하세요.
+
+공식 API 참고: [OpenAI 텍스트 생성](https://developers.openai.com/api/docs/guides/text), [Ollama Chat](https://docs.ollama.com/api/chat).
