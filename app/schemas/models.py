@@ -9,6 +9,7 @@ class ModelWrite(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     provider: Literal["openai", "ollama"]
     model: str = Field(min_length=1, max_length=100)
+    purpose: Literal["embedding", "generation"] = "embedding"
     api_key: SecretStr | None = None
 
     @field_validator("api_key")
@@ -23,7 +24,7 @@ class ModelWrite(BaseModel):
 
     @model_validator(mode="after")
     def validate_model(self) -> "ModelWrite":
-        if self.provider == "openai" and self.model not in {"text-embedding-3-small", "text-embedding-3-large"}:
+        if self.purpose == "embedding" and self.provider == "openai" and self.model not in {"text-embedding-3-small", "text-embedding-3-large"}:
             raise ValueError("지원하지 않는 OpenAI 임베딩 모델입니다.")
         if self.provider == "ollama" and self.api_key is not None:
             raise ValueError("Ollama는 API 키를 사용하지 않습니다.")
@@ -36,5 +37,6 @@ class ModelResponse(BaseModel):
     name: str
     provider: Literal["openai", "ollama"]
     model: str
+    purpose: Literal["embedding", "generation"] = "embedding"
     has_api_key: bool
     created_at: str

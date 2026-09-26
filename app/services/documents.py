@@ -114,6 +114,10 @@ class DocumentService:
             if "embedding_size_bytes" not in columns:
                 connection.execute("ALTER TABLE documents ADD COLUMN embedding_size_bytes INTEGER NOT NULL DEFAULT 0")
                 connection.execute("UPDATE documents SET embedding_size_bytes = COALESCE((SELECT SUM(length(CAST(embedding AS BLOB))) FROM chunks WHERE document_id = documents.id), 0)")
+            service_columns = {row[1] for row in connection.execute("PRAGMA table_info(service_settings)")}
+            for name, definition in {"embedding_model_id": "TEXT", "generation_model_id": "TEXT", "search_top_k": "INTEGER NOT NULL DEFAULT 5", "system_prompt": "TEXT NOT NULL DEFAULT ''"}.items():
+                if name not in service_columns:
+                    connection.execute(f"ALTER TABLE service_settings ADD COLUMN {name} {definition}")
             index_columns = {row[1] for row in connection.execute("PRAGMA table_info(indices)")}
             if "updated_at" not in index_columns:
                 connection.execute("ALTER TABLE indices ADD COLUMN updated_at TEXT")

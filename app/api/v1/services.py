@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.core.config import get_settings
 from app.services.documents import DocumentService
+from app.services.models import ModelService
 from app.services.projects import ProjectService
 
 router = APIRouter(prefix='/projects/{project_id}/services', tags=['services'])
@@ -53,6 +54,10 @@ class ServiceWrite(BaseModel):
     description: str = Field(default='', max_length=500)
     members: list[Member] = Field(min_length=1, max_length=100)
     index_limit: int = Field(default=5, ge=1, le=10000, strict=True)
+    embedding_model_id: UUID | None = None
+    generation_model_id: UUID | None = None
+    search_top_k: int = Field(default=5, ge=1, le=20, strict=True)
+    system_prompt: str = Field(default="", max_length=2000)
     created_at: datetime | None = None
 
     @field_validator('members')
@@ -73,12 +78,19 @@ def save_service(project_id: UUID, service_id: UUID, payload: ServiceWrite,
     with closing(ProjectService(settings).connect()) as projects:
         if not projects.execute('SELECT id FROM projects WHERE id = ?', (str(project_id),)).fetchone():
             raise HTTPException(404, '프로젝트를 찾을 수 없습니다.')
+    ModelService(settings).connect().close()
     with closing(DocumentService(settings).connect()) as connection, connection:
         connection.execute('BEGIN IMMEDIATE')
         existing = connection.execute('SELECT * FROM service_settings WHERE project_id = ? AND id = ?', (str(project_id), str(service_id))).fetchone()
         members = json.loads(existing['members']) if existing else [member.model_dump() for member in payload.members]
         if not any(member['email'] == actor and member['role'] == 'admin' for member in members):
             raise HTTPException(403, '서비스 관리자만 설정을 변경할 수 있습니다.')
+        for field, purpose in [('embedding_model_id', 'embedding'), ('generation_model_id', 'generation')]:
+            value = getattr(payload, field)
+            if value is not None and not connection.execute(
+                'SELECT id FROM model_configs WHERE id = ? AND project_id = ? AND purpose = ?',
+                (str(value), str(project_id), purpose)).fetchone():
+                raise HTTPException(422, '현재 프로젝트에서 용도에 맞는 모델을 선택하세요.')
         count = connection.execute('SELECT COUNT(*) FROM indices WHERE project_id = ? AND service_id = ?', (str(project_id), str(service_id))).fetchone()[0]
         if payload.index_limit < count:
             raise HTTPException(409, f'현재 인덱스 {count}개보다 한도를 작게 설정할 수 없습니다.')
@@ -89,6 +101,10 @@ def save_service(project_id: UUID, service_id: UUID, payload: ServiceWrite,
             name=excluded.name, description=excluded.description, members=excluded.members,
             index_limit=excluded.index_limit, updated_at=excluded.updated_at''',
             (str(service_id), str(project_id), payload.name, payload.description, json.dumps([m.model_dump() for m in payload.members]), payload.index_limit, created, now))
+        connection.execute('UPDATE service_settings SET embedding_model_id = ?, generation_model_id = ?, search_top_k = ?, system_prompt = ? WHERE project_id = ? AND id = ?',
+                           (str(payload.embedding_model_id) if payload.embedding_model_id else None,
+                            str(payload.generation_model_id) if payload.generation_model_id else None,
+                            payload.search_top_k, payload.system_prompt, str(project_id), str(service_id)))
         connection.execute('UPDATE indices SET service_name = ?, updated_at = ? WHERE project_id = ? AND service_id = ? AND service_name != ?',
                            (payload.name, now, str(project_id), str(service_id), payload.name))
         return {**payload.model_dump(exclude={'created_at'}), 'id': str(service_id), 'project_id': str(project_id), 'created_at': created, 'updated_at': now}

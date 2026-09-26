@@ -57,3 +57,22 @@ def update_model(project_id: UUID, model_id: UUID, payload: ModelWrite, service:
 def delete_model(project_id: UUID, model_id: UUID, service: Service):
     service.delete(str(project_id), str(model_id))
     return Response(status_code=204)
+
+
+@router.post('/{model_id}/test')
+def test_model(project_id: UUID, model_id: UUID, service: Service):
+    from time import perf_counter
+    from app.services.documents import DocumentService
+    from app.services.generation import GenerationService
+
+    started = perf_counter()
+    model = next((item for item in service.list_models(str(project_id)) if item.id == str(model_id)), None)
+    if model is None:
+        raise DocumentError(404, '모델 설정을 찾을 수 없습니다.')
+    if model.purpose == 'embedding':
+        vectors = DocumentService(service.embedding_settings(str(project_id), str(model_id))).embed(['연결 확인'])
+        detail = f'임베딩 연결 성공 · {len(vectors[0])}차원'
+    else:
+        GenerationService(service.settings).generate(str(project_id), str(model_id), 'Reply briefly.', 'Say OK.')
+        detail = '답변 생성 연결 성공'
+    return {'status': 'ok', 'detail': detail, 'elapsed_ms': round((perf_counter() - started) * 1000)}
