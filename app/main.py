@@ -14,15 +14,18 @@ def create_app() -> FastAPI:
         debug=settings.debug,
     )
     application.add_middleware(
-        CORSMiddleware, allow_origins=settings.cors_origins,
-        allow_methods=["GET", "POST", "PUT", "DELETE"], allow_headers=["Content-Type", "X-User-Email", "X-User-Name"],
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
+        allow_headers=["Content-Type", "X-User-Email", "X-User-Name"],
     )
     application.include_router(api_router, prefix="/api/v1")
 
     @application.get("/api/docs", include_in_schema=False)
     async def api_docs():
         return get_swagger_ui_html(
-            openapi_url="./openapi.json", title=f"{settings.app_name} - Swagger UI",
+            openapi_url="./openapi.json",
+            title=f"{settings.app_name} - Swagger UI",
         )
 
     @application.get("/api/openapi.json", include_in_schema=False)

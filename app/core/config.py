@@ -28,8 +28,12 @@ class Settings(BaseSettings):
     chunk_overlap: int = Field(default=100, ge=0)
     max_document_chars: int = Field(default=1_000_000, gt=0)
     embedding_provider: Literal["ollama", "openai"] = "ollama"
-    openai_api_key: SecretStr = Field(default=SecretStr(""), validation_alias=AliasChoices("RAG_OPENAI_API_KEY", "OPENAI_API_KEY"))
-    openai_embedding_model: Literal["text-embedding-3-small", "text-embedding-3-large"] = "text-embedding-3-small"
+    openai_api_key: SecretStr = Field(
+        default=SecretStr(""), validation_alias=AliasChoices("RAG_OPENAI_API_KEY", "OPENAI_API_KEY")
+    )
+    openai_embedding_model: Literal["text-embedding-3-small", "text-embedding-3-large"] = (
+        "text-embedding-3-small"
+    )
     embedding_base_url: str = "http://127.0.0.1:11434"
     embedding_model: str = "embeddinggemma"
     embedding_batch_size: int = Field(default=16, ge=1, le=128)

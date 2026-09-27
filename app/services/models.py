@@ -25,11 +25,17 @@ class ModelService:
             provider TEXT NOT NULL, model TEXT NOT NULL, encrypted_api_key TEXT,
             created_at TEXT NOT NULL
         )""")
-        connection.execute("CREATE INDEX IF NOT EXISTS model_configs_project ON model_configs(project_id)")
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS model_configs_project ON model_configs(project_id)"
+        )
         with connection:
             connection.execute("BEGIN IMMEDIATE")
-            if "purpose" not in {row[1] for row in connection.execute("PRAGMA table_info(model_configs)")}:
-                connection.execute("ALTER TABLE model_configs ADD COLUMN purpose TEXT NOT NULL DEFAULT 'embedding'")
+            if "purpose" not in {
+                row[1] for row in connection.execute("PRAGMA table_info(model_configs)")
+            }:
+                connection.execute(
+                    "ALTER TABLE model_configs ADD COLUMN purpose TEXT NOT NULL DEFAULT 'embedding'"
+                )
         return connection
 
     def cipher(self) -> Fernet:
@@ -38,6 +44,7 @@ class ModelService:
         # Atomic creation prevents readers from observing a partially written key.
         if not path.exists():
             import tempfile
+
             descriptor, temporary = tempfile.mkstemp(dir=path.parent)
             try:
                 with os.fdopen(descriptor, 'wb') as output:
@@ -55,58 +62,122 @@ class ModelService:
 
     @staticmethod
     def public(row) -> ModelResponse:
-        return ModelResponse(**{key: row[key] for key in ('id', 'project_id', 'name', 'provider', 'model', 'created_at', 'purpose')},
-                             has_api_key=bool(row['encrypted_api_key']))
+        return ModelResponse(
+            **{
+                key: row[key]
+                for key in (
+                    'id',
+                    'project_id',
+                    'name',
+                    'provider',
+                    'model',
+                    'created_at',
+                    'purpose',
+                )
+            },
+            has_api_key=bool(row['encrypted_api_key'])
+        )
 
     def list_models(self, project_id: str) -> list[ModelResponse]:
         with closing(self.connect()) as connection:
-            return [self.public(row) for row in connection.execute(
-                'SELECT * FROM model_configs WHERE project_id = ? ORDER BY created_at, id', (project_id,))]
+            return [
+                self.public(row)
+                for row in connection.execute(
+                    'SELECT * FROM model_configs WHERE project_id = ? ORDER BY created_at, id',
+                    (project_id,),
+                )
+            ]
 
-    def save(self, project_id: str, payload: ModelWrite, model_id: str | None = None) -> ModelResponse:
+    def save(
+        self, project_id: str, payload: ModelWrite, model_id: str | None = None
+    ) -> ModelResponse:
         with closing(self.connect()) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
-            if not connection.execute('SELECT id FROM projects WHERE id = ?', (project_id,)).fetchone():
+            if not connection.execute(
+                'SELECT id FROM projects WHERE id = ?', (project_id,)
+            ).fetchone():
                 raise DocumentError(404, "프로젝트를 찾을 수 없습니다.")
             previous = None
             if model_id:
-                previous = connection.execute('SELECT * FROM model_configs WHERE id = ? AND project_id = ?',
-                                              (model_id, project_id)).fetchone()
+                previous = connection.execute(
+                    'SELECT * FROM model_configs WHERE id = ? AND project_id = ?',
+                    (model_id, project_id),
+                ).fetchone()
                 if previous is None:
                     raise DocumentError(404, "모델 설정을 찾을 수 없습니다.")
-            if previous and (previous['provider'], previous['model'], previous['purpose']) != (payload.provider, payload.model, payload.purpose):
-                if connection.execute('SELECT 1 FROM service_settings WHERE project_id = ? AND (embedding_model_id = ? OR generation_model_id = ?)', (project_id, model_id, model_id)).fetchone():
-                    raise DocumentError(409, '서비스에서 사용 중인 모델의 공급자·용도·ID는 변경할 수 없습니다. 새 모델을 등록해 서비스를 변경하세요.')
+            if previous and (previous['provider'], previous['model'], previous['purpose']) != (
+                payload.provider,
+                payload.model,
+                payload.purpose,
+            ):
+                if connection.execute(
+                    'SELECT 1 FROM service_settings WHERE project_id = ? AND (embedding_model_id = ? OR generation_model_id = ?)',
+                    (project_id, model_id, model_id),
+                ).fetchone():
+                    raise DocumentError(
+                        409,
+                        '서비스에서 사용 중인 모델의 공급자·용도·ID는 변경할 수 없습니다. 새 모델을 등록해 서비스를 변경하세요.',
+                    )
             encrypted = None
             if payload.provider == 'openai':
                 if payload.api_key is not None:
-                    encrypted = self.cipher().encrypt(payload.api_key.get_secret_value().encode()).decode()
+                    encrypted = (
+                        self.cipher().encrypt(payload.api_key.get_secret_value().encode()).decode()
+                    )
                 elif previous and previous['provider'] == 'openai':
                     encrypted = previous['encrypted_api_key']
                 if not encrypted:
                     raise DocumentError(422, "OpenAI API 키를 입력하세요.")
             model_id = model_id or str(uuid4())
-            created_at = previous['created_at'] if previous else datetime.now(timezone.utc).isoformat()
-            connection.execute('''INSERT INTO model_configs (id, project_id, name, provider, model, encrypted_api_key, created_at, purpose) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            created_at = (
+                previous['created_at'] if previous else datetime.now(timezone.utc).isoformat()
+            )
+            connection.execute(
+                '''INSERT INTO model_configs (id, project_id, name, provider, model, encrypted_api_key, created_at, purpose) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET name=excluded.name, provider=excluded.provider,
                 model=excluded.model, encrypted_api_key=excluded.encrypted_api_key, purpose=excluded.purpose''',
-                (model_id, project_id, payload.name, payload.provider, payload.model, encrypted, created_at, payload.purpose))
-            row = connection.execute('SELECT * FROM model_configs WHERE id = ?', (model_id,)).fetchone()
+                (
+                    model_id,
+                    project_id,
+                    payload.name,
+                    payload.provider,
+                    payload.model,
+                    encrypted,
+                    created_at,
+                    payload.purpose,
+                ),
+            )
+            row = connection.execute(
+                'SELECT * FROM model_configs WHERE id = ?', (model_id,)
+            ).fetchone()
             return self.public(row)
 
     def delete(self, project_id: str, model_id: str):
         with closing(self.connect()) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
-            if connection.execute('SELECT 1 FROM service_settings WHERE project_id = ? AND (embedding_model_id = ? OR generation_model_id = ?)', (project_id, model_id, model_id)).fetchone():
-                raise DocumentError(409, '서비스에서 사용 중인 모델입니다. 서비스 설정에서 모델을 변경하거나 연결을 해제하세요.')
-            if connection.execute('DELETE FROM model_configs WHERE id = ? AND project_id = ?',
-                                  (model_id, project_id)).rowcount == 0:
+            if connection.execute(
+                'SELECT 1 FROM service_settings WHERE project_id = ? AND (embedding_model_id = ? OR generation_model_id = ?)',
+                (project_id, model_id, model_id),
+            ).fetchone():
+                raise DocumentError(
+                    409,
+                    '서비스에서 사용 중인 모델입니다. 서비스 설정에서 모델을 변경하거나 연결을 해제하세요.',
+                )
+            if (
+                connection.execute(
+                    'DELETE FROM model_configs WHERE id = ? AND project_id = ?',
+                    (model_id, project_id),
+                ).rowcount
+                == 0
+            ):
                 raise DocumentError(404, "모델 설정을 찾을 수 없습니다.")
 
     def embedding_settings(self, project_id: str, model_id: str) -> Settings:
         with closing(self.connect()) as connection:
-            row = connection.execute('SELECT * FROM model_configs WHERE id = ? AND project_id = ?',
-                                     (model_id, project_id)).fetchone()
+            row = connection.execute(
+                'SELECT * FROM model_configs WHERE id = ? AND project_id = ?',
+                (model_id, project_id),
+            ).fetchone()
         if row is None:
             raise DocumentError(404, "모델 설정을 찾을 수 없습니다. 설정에서 모델을 등록하세요.")
         if row['purpose'] != 'embedding':
@@ -116,7 +187,9 @@ class ModelService:
             try:
                 key = self.cipher().decrypt(row['encrypted_api_key'].encode()).decode()
             except InvalidToken as exc:
-                raise DocumentError(503, "API 키를 읽을 수 없습니다. 설정에서 키를 다시 입력하세요.") from exc
+                raise DocumentError(
+                    503, "API 키를 읽을 수 없습니다. 설정에서 키를 다시 입력하세요."
+                ) from exc
             updates.update(openai_api_key=SecretStr(key), openai_embedding_model=row['model'])
         else:
             updates['embedding_model'] = row['model']

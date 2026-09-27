@@ -17,9 +17,15 @@ def get_document_service() -> DocumentService:
 
 
 @router.get("", response_model=list[DocumentResponse])
-def list_documents(project_id: UUID, service: Annotated[DocumentService, Depends(get_document_service)], index_id: UUID | None = None):
+def list_documents(
+    project_id: UUID,
+    service: Annotated[DocumentService, Depends(get_document_service)],
+    index_id: UUID | None = None,
+):
     try:
-        return service.list_documents(str(project_id), str(index_id) if index_id is not None else None)
+        return service.list_documents(
+            str(project_id), str(index_id) if index_id is not None else None
+        )
     except DocumentError as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc
 
@@ -37,15 +43,23 @@ def upload_document(
     try:
         if model_config_id is not None:
             if embedding_provider is not None or embedding_model is not None:
-                raise DocumentError(422, "등록 모델과 공급자 직접 설정을 동시에 지정할 수 없습니다.")
-            service = DocumentService(ModelService(service.settings).embedding_settings(str(project_id), str(model_config_id)))
+                raise DocumentError(
+                    422, "등록 모델과 공급자 직접 설정을 동시에 지정할 수 없습니다."
+                )
+            service = DocumentService(
+                ModelService(service.settings).embedding_settings(
+                    str(project_id), str(model_config_id)
+                )
+            )
         elif embedding_provider is not None or embedding_model is not None:
             service = service.for_embedding(embedding_provider, embedding_model)
         filename = (file.filename or "").replace("\\", "/").rsplit("/", 1)[-1]
         if not filename or len(filename) > 255:
             raise DocumentError(422, "유효한 파일 이름이 필요합니다 (최대 255자).")
         data = file.file.read(service.settings.max_upload_bytes + 1)
-        return service.ingest(str(project_id), filename, data, str(index_id) if index_id is not None else None)
+        return service.ingest(
+            str(project_id), filename, data, str(index_id) if index_id is not None else None
+        )
     except DocumentError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     finally:
@@ -53,8 +67,13 @@ def upload_document(
 
 
 @router.get('/{document_id}/chunks', response_model=ChunkPage)
-def list_chunks(project_id: UUID, document_id: UUID, service: Annotated[DocumentService, Depends(get_document_service)],
-                offset: Annotated[int, Query(ge=0)] = 0, limit: Annotated[int, Query(ge=1, le=100)] = 50):
+def list_chunks(
+    project_id: UUID,
+    document_id: UUID,
+    service: Annotated[DocumentService, Depends(get_document_service)],
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+):
     try:
         return service.list_chunks(str(project_id), str(document_id), offset, limit)
     except DocumentError as exc:
@@ -62,7 +81,12 @@ def list_chunks(project_id: UUID, document_id: UUID, service: Annotated[Document
 
 
 @router.put('/{document_id}', response_model=DocumentResponse)
-def update_document(project_id: UUID, document_id: UUID, payload: DocumentUpdate, service: Annotated[DocumentService, Depends(get_document_service)]):
+def update_document(
+    project_id: UUID,
+    document_id: UUID,
+    payload: DocumentUpdate,
+    service: Annotated[DocumentService, Depends(get_document_service)],
+):
     try:
         return service.update_document(str(project_id), str(document_id), payload)
     except DocumentError as exc:
@@ -70,7 +94,11 @@ def update_document(project_id: UUID, document_id: UUID, payload: DocumentUpdate
 
 
 @router.delete('/{document_id}', status_code=204)
-def delete_document(project_id: UUID, document_id: UUID, service: Annotated[DocumentService, Depends(get_document_service)]):
+def delete_document(
+    project_id: UUID,
+    document_id: UUID,
+    service: Annotated[DocumentService, Depends(get_document_service)],
+):
     try:
         service.delete_document(str(project_id), str(document_id))
         return Response(status_code=204)

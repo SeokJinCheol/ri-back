@@ -10,6 +10,7 @@ from app.core.config import get_settings
 from app.schemas.chat import Answer, ConversationCreate, MessageCreate, SearchRequest
 from app.services.chat import ChatService
 
+
 class ChatRoute(APIRoute):
     def get_route_handler(self):
         handler = super().get_route_handler()
@@ -20,9 +21,12 @@ class ChatRoute(APIRoute):
                 response.headers['Cache-Control'] = 'no-store'
                 return response
             except RequestValidationError as exc:
-                raise HTTPException(422, '질문(1~4,000자), 검색 인덱스, 요청 ID와 사용자 정보를 확인하세요.') from exc
+                raise HTTPException(
+                    422, '질문(1~4,000자), 검색 인덱스, 요청 ID와 사용자 정보를 확인하세요.'
+                ) from exc
             except DocumentError as exc:
                 raise HTTPException(exc.status_code, exc.detail) from exc
+
         return safe_handler
 
 
@@ -38,7 +42,9 @@ Actor = Annotated[str, Header(alias='X-User-Email', min_length=3, max_length=254
 
 
 @router.post('/projects/{project_id}/services/{service_id}/search')
-def search(project_id: UUID, service_id: UUID, payload: SearchRequest, service: Service, actor: Actor):
+def search(
+    project_id: UUID, service_id: UUID, payload: SearchRequest, service: Service, actor: Actor
+):
     return {'sources': service.search(str(project_id), str(service_id), actor, payload)}
 
 
@@ -48,7 +54,9 @@ def conversations(project_id: UUID, service_id: UUID, service: Service, actor: A
 
 
 @router.post('/projects/{project_id}/services/{service_id}/conversations', status_code=201)
-def create(project_id: UUID, service_id: UUID, payload: ConversationCreate, service: Service, actor: Actor):
+def create(
+    project_id: UUID, service_id: UUID, payload: ConversationCreate, service: Service, actor: Actor
+):
     return service.create(str(project_id), str(service_id), actor, payload)
 
 

@@ -85,11 +85,11 @@ Nginx 경유 Swagger: <http://true-iron.co.kr/ri-rag/api/docs>
 
 ## API
 
-| 메서드 | 경로 | 동작 |
-| --- | --- | --- |
-| GET | `/` | 앱 정보 |
-| GET | `/api/v1/health` | 프로세스 정상 실행 시 `{"status":"ok"}` |
-| POST | `/api/v1/rag/query` | 질문과 top_k 검증 후 RAG 서비스 호출 |
+| 메서드 | 경로                | 동작                                    |
+| ------ | ------------------- | --------------------------------------- |
+| GET    | `/`                 | 앱 정보                                 |
+| GET    | `/api/v1/health`    | 프로세스 정상 실행 시 `{"status":"ok"}` |
+| POST   | `/api/v1/rag/query` | 질문과 top_k 검증 후 RAG 서비스 호출    |
 
 질문은 공백 제거 후 1~4,000자, top_k는 정수 1~20이며 기본값은 5입니다.
 잘못된 입력은 422, RAG 구현체 미연결 시에는 503을 반환합니다.
@@ -277,14 +277,14 @@ Documents 화면에서는 업로드할 인덱스를 반드시 선택합니다.
 
 ### API
 
-| 메서드 | 경로 | 내용 |
-| --- | --- | --- |
-| POST | `/api/v1/projects/{project_id}/models/{model_id}/test` | 용도별 연결 확인, 처리 시간·임베딩 차원 반환 |
-| POST | `/api/v1/projects/{project_id}/services/{service_id}/search` | `question`, `index_ids`, 선택 `top_k`; 검색 출처 반환 |
-| GET/POST | `/api/v1/projects/{project_id}/services/{service_id}/conversations` | 본인 대화 최근 100개 목록 / `index_ids`로 생성 |
-| GET | `/api/v1/conversations/{conversation_id}/messages` | 완료된 질문·답변·현재 열람 가능한 출처 |
-| POST | `/api/v1/conversations/{conversation_id}/messages` | `question`, UUID `client_request_id`로 질문 |
-| DELETE | `/api/v1/conversations/{conversation_id}` | 본인 대화와 메시지 삭제 |
+| 메서드   | 경로                                                                | 내용                                                  |
+| -------- | ------------------------------------------------------------------- | ----------------------------------------------------- |
+| POST     | `/api/v1/projects/{project_id}/models/{model_id}/test`              | 용도별 연결 확인, 처리 시간·임베딩 차원 반환          |
+| POST     | `/api/v1/projects/{project_id}/services/{service_id}/search`        | `question`, `index_ids`, 선택 `top_k`; 검색 출처 반환 |
+| GET/POST | `/api/v1/projects/{project_id}/services/{service_id}/conversations` | 본인 대화 최근 100개 목록 / `index_ids`로 생성        |
+| GET      | `/api/v1/conversations/{conversation_id}/messages`                  | 완료된 질문·답변·현재 열람 가능한 출처                |
+| POST     | `/api/v1/conversations/{conversation_id}/messages`                  | `question`, UUID `client_request_id`로 질문           |
+| DELETE   | `/api/v1/conversations/{conversation_id}`                           | 본인 대화와 메시지 삭제                               |
 
 Chat API는 현행 임시 로그인과 동일한 `X-User-Email` 헤더를 요구합니다. 저장된 서비스 멤버 및 대화 소유자를 확인하지만 이 헤더는 실제 인증이 아닙니다. 신규 기능도 **로컬 개발용**이며 실제 로그인·전체 기존 API 권한 통합은 별도 단계입니다.
 
@@ -305,3 +305,14 @@ Chat API는 현행 임시 로그인과 동일한 `X-User-Email` 헤더를 요구
 생성 공급자 호출은 테스트에서 모의 응답으로 검증합니다. 실제 공급자 동작은 등록 모델의 연결 확인으로 확인하세요.
 
 공식 API 참고: [OpenAI 텍스트 생성](https://developers.openai.com/api/docs/guides/text), [Ollama Chat](https://docs.ollama.com/api/chat).
+
+## 코드 포맷
+
+Python 코드는 `pyproject.toml`의 Black 설정을 기준으로 4칸 들여쓰기와
+기본 줄 너비 100자를 사용합니다. 기존 문자열 표기는 유지합니다.
+
+```sh
+python -m pip install -r requirements-dev.txt
+python -m black .
+python -m black --check .
+```

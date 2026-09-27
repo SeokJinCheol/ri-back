@@ -24,7 +24,11 @@ class ModelWrite(BaseModel):
 
     @model_validator(mode="after")
     def validate_model(self) -> "ModelWrite":
-        if self.purpose == "embedding" and self.provider == "openai" and self.model not in {"text-embedding-3-small", "text-embedding-3-large"}:
+        if (
+            self.purpose == "embedding"
+            and self.provider == "openai"
+            and self.model not in {"text-embedding-3-small", "text-embedding-3-large"}
+        ):
             raise ValueError("지원하지 않는 OpenAI 임베딩 모델입니다.")
         if self.provider == "ollama" and self.api_key is not None:
             raise ValueError("Ollama는 API 키를 사용하지 않습니다.")

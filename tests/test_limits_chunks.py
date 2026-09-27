@@ -22,7 +22,12 @@ from app.services.projects import ProjectService
 class LimitsChunkTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.settings = Settings(_env_file=None, document_db_path=Path(self.temp.name) / 'test.db', chunk_size=100, chunk_overlap=20)
+        self.settings = Settings(
+            _env_file=None,
+            document_db_path=Path(self.temp.name) / 'test.db',
+            chunk_size=100,
+            chunk_overlap=20,
+        )
         self.project = ProjectService(self.settings).create_project(ProjectCreate(name='Test')).id
         self.service_id = str(uuid4())
         self.docs = DocumentService(self.settings)
@@ -35,7 +40,13 @@ class LimitsChunkTests(unittest.TestCase):
         self.settings_patch = patch('app.api.v1.services.get_settings', return_value=self.settings)
         self.settings_patch.start()
         self.service_url = f'/api/v1/projects/{self.project}/services/{self.service_id}'
-        self.service_payload = {'name': 'Service', 'members': [{'email': 'admin@example.com', 'role': 'admin'}, {'email': 'member@example.com', 'role': 'member'}]}
+        self.service_payload = {
+            'name': 'Service',
+            'members': [
+                {'email': 'admin@example.com', 'role': 'admin'},
+                {'email': 'member@example.com', 'role': 'member'},
+            ],
+        }
 
     def tearDown(self):
         self.settings_patch.stop()
@@ -43,7 +54,11 @@ class LimitsChunkTests(unittest.TestCase):
         self.temp.cleanup()
 
     def save_service(self, limit=5, actor='admin@example.com'):
-        return self.client.put(self.service_url, json=self.service_payload | {'index_limit': limit}, headers={'X-User-Email': actor})
+        return self.client.put(
+            self.service_url,
+            json=self.service_payload | {'index_limit': limit},
+            headers={'X-User-Email': actor},
+        )
 
     def test_service_dates_admin_and_limit(self):
         created = self.save_service().json()
@@ -69,6 +84,7 @@ class LimitsChunkTests(unittest.TestCase):
                 return self.indices.create(self.project, self.payload).id
             except DocumentError:
                 return None
+
         with ThreadPoolExecutor(max_workers=4) as executor:
             results = list(executor.map(create, range(8)))
         self.assertEqual(sum(value is not None for value in results), 5)
@@ -76,7 +92,10 @@ class LimitsChunkTests(unittest.TestCase):
 
     def test_index_update_preserves_creation_date(self):
         index = self.indices.create(self.project, self.payload)
-        response = self.client.put(f'/api/v1/projects/{self.project}/indices/{index.id}', json={**self.payload.model_dump(mode='json'), 'name': 'Renamed'})
+        response = self.client.put(
+            f'/api/v1/projects/{self.project}/indices/{index.id}',
+            json={**self.payload.model_dump(mode='json'), 'name': 'Renamed'},
+        )
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()['created_at'], index.created_at)
         self.assertGreater(response.json()['updated_at'], index.updated_at)
@@ -97,30 +116,51 @@ class LimitsChunkTests(unittest.TestCase):
     def test_embedding_limit_while_receiving_batches(self):
         self.settings.max_embedding_bytes = 1
         with patch('app.services.documents.httpx.Client') as provider:
-            provider.return_value.__enter__.return_value.post.return_value.json.return_value = {'embeddings': [[0.1, 0.2]]}
+            provider.return_value.__enter__.return_value.post.return_value.json.return_value = {
+                'embeddings': [[0.1, 0.2]]
+            }
             with self.assertRaises(DocumentError) as error:
                 self.docs.embed(['hello'])
         self.assertEqual(error.exception.status_code, 413)
 
     def test_chunk_pagination_scoping_and_document_update(self):
-        with patch.object(self.docs, 'embed', side_effect=lambda chunks: [[0.1, 0.2] for _ in chunks]):
+        with patch.object(
+            self.docs, 'embed', side_effect=lambda chunks: [[0.1, 0.2] for _ in chunks]
+        ):
             doc = self.docs.ingest(self.project, 'long.txt', b'x' * 5000)
         self.assertGreater(doc.chunk_count, 50)
         url = f'/api/v1/documents/{doc.id}/chunks'
-        first = self.client.get(url, params={'project_id': self.project, 'offset': 0, 'limit': 50}).json()
-        second = self.client.get(url, params={'project_id': self.project, 'offset': 50, 'limit': 50}).json()
+        first = self.client.get(
+            url, params={'project_id': self.project, 'offset': 0, 'limit': 50}
+        ).json()
+        second = self.client.get(
+            url, params={'project_id': self.project, 'offset': 50, 'limit': 50}
+        ).json()
         chunks = first['items'] + second['items']
         self.assertEqual([item['chunk_index'] for item in chunks], list(range(doc.chunk_count)))
-        self.assertEqual(sum(item['embedding_size_bytes'] for item in chunks), doc.embedding_size_bytes)
+        self.assertEqual(
+            sum(item['embedding_size_bytes'] for item in chunks), doc.embedding_size_bytes
+        )
         self.assertNotIn('embedding', chunks[0])
         self.assertEqual(self.client.get(url, params={'project_id': str(uuid4())}).status_code, 404)
-        self.assertEqual(self.client.get(url, params={'project_id': self.project, 'limit': 101}).status_code, 422)
-        self.assertEqual(self.client.get(url, params={'project_id': self.project, 'offset': -1}).status_code, 422)
-        response = self.client.put(f'/api/v1/documents/{doc.id}', params={'project_id': self.project}, json={'filename': 'renamed.txt'})
+        self.assertEqual(
+            self.client.get(url, params={'project_id': self.project, 'limit': 101}).status_code, 422
+        )
+        self.assertEqual(
+            self.client.get(url, params={'project_id': self.project, 'offset': -1}).status_code, 422
+        )
+        response = self.client.put(
+            f'/api/v1/documents/{doc.id}',
+            params={'project_id': self.project},
+            json={'filename': 'renamed.txt'},
+        )
         self.assertEqual(response.status_code, 200)
         updated = response.json()
         self.assertEqual(updated['created_at'], doc.created_at)
         self.assertGreater(updated['updated_at'], doc.updated_at)
         self.assertEqual(updated['embedding_size_bytes'], doc.embedding_size_bytes)
         self.assertEqual(updated['chunk_count'], doc.chunk_count)
-        self.assertEqual(self.docs.list_chunks(self.project, doc.id, 0, 50).items[0].content, chunks[0]['content'])
+        self.assertEqual(
+            self.docs.list_chunks(self.project, doc.id, 0, 50).items[0].content,
+            chunks[0]['content'],
+        )

@@ -14,9 +14,7 @@ class RAGService:
 
     async def query(self, request: QueryRequest) -> QueryResponse:
         if self.retriever is None or self.generator is None:
-            raise RAGNotConfiguredError(
-                "RAG retriever and generator are not configured."
-            )
+            raise RAGNotConfiguredError("RAG retriever and generator are not configured.")
 
         documents = await self.retriever.retrieve(request.question, request.top_k)
         answer = await self.generator.generate(request.question, documents)
